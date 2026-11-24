@@ -1,6 +1,14 @@
 import json
 
-from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart, ToolReturnPart
+import pytest
+from pydantic import ValidationError
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelResponse,
+    RetryPromptPart,
+    ToolCallPart,
+    ToolReturnPart,
+)
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from stock_agent.agent import agent
@@ -13,7 +21,7 @@ def scripted_llm(tool_args: dict, answer_text: str) -> FunctionModel:
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         returns = [p for p in messages[-1].parts if isinstance(p, ToolReturnPart)]
         if not returns:
-            return ModelResponse(parts=[ToolCallPart("get_financial_metric", tool_args)])
+            return ModelResponse(parts=[ToolCallPart("get_financial_fact", tool_args)])
         fact = returns[0].content
         if isinstance(fact, str):
             fact = json.loads(fact)
@@ -38,3 +46,47 @@ def test_cli_prints_answer_and_the_financial_fact_it_used(monkeypatch, capfd):
     assert "Apple's FY2026 revenue was US$478.8 billion" in out
     assert "AAPL revenue FY2026 (period ended 2026-09-26): 478,834,000,000 USD" in out
     assert "10-K filed 2026-11-03" in out
+
+
+def test_cli_rejects_a_non_gemini_model_setting(monkeypatch):
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+    monkeypatch.setenv("STOCK_AGENT_MODEL", "openai:gpt-6")
+
+    with pytest.raises(ValidationError, match="only Gemini models"):
+        main(["What was Apple's latest revenue?"])
+
+
+def test_cli_never_prints_a_financial_fact_the_tool_did_not_return(monkeypatch, capfd):
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+    real_fact: dict = {}
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        last = messages[-1].parts
+        output_tool = info.output_tools[0].name
+        # The output validator's rejection comes back as the output tool's result.
+        if any(
+            isinstance(p, ToolReturnPart | RetryPromptPart) and p.tool_name == output_tool
+            for p in last
+        ):
+            final = {"text": "Corrected answer.", "facts": [real_fact]}
+            return ModelResponse(parts=[ToolCallPart(output_tool, final)])
+        returns = [
+            p for p in last if isinstance(p, ToolReturnPart) and p.tool_name == "get_financial_fact"
+        ]
+        if not returns:
+            args = {"ticker": "AAPL", "metric": "revenue"}
+            return ModelResponse(parts=[ToolCallPart("get_financial_fact", args)])
+        content = returns[0].content
+        real_fact.update(json.loads(content) if isinstance(content, str) else content)
+        invented = {**real_fact, "value": 999_000_000_000}
+        final = {"text": "Invented answer.", "facts": [invented]}
+        return ModelResponse(parts=[ToolCallPart(output_tool, final)])
+
+    with agent.override(model=FunctionModel(respond)):
+        exit_code = main(["What was Apple's latest revenue?"])
+
+    out = capfd.readouterr().out
+    assert exit_code == 0
+    assert "Corrected answer." in out
+    assert "999,000,000,000" not in out
+    assert "478,834,000,000 USD" in out

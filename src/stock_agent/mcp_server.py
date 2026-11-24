@@ -5,7 +5,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from stock_agent.facts import FinancialFact, Metric
+from stock_agent.facts import FinancialFact, FinancialMetric, Ticker
 
 mcp = FastMCP("stock-data")
 
@@ -14,20 +14,20 @@ mcp = FastMCP("stock-data")
 FACTS = [
     FinancialFact(
         ticker="AAPL",
-        metric=Metric.REVENUE,
+        metric=FinancialMetric.REVENUE,
         fiscal_year=2026,
         period_end=date(2026, 9, 26),
         value=478_834_000_000,
         unit="USD",
-        source="10-K filed 2026-11-03",
+        filing="10-K filed 2026-11-03",
     ),
 ]
 
 
 @mcp.tool
-def get_financial_metric(
-    ticker: Annotated[str, Field(description="Company ticker in upper case, e.g. AAPL or MSFT.")],
-    metric: Annotated[Metric, Field(description="Which Financial Metric to look up.")],
+def get_financial_fact(
+    ticker: Annotated[Ticker, Field(description="Company ticker, e.g. AAPL or MSFT.")],
+    metric: Annotated[FinancialMetric, Field(description="Which Financial Metric to look up.")],
     fiscal_year: Annotated[
         int | None,
         Field(
@@ -40,16 +40,17 @@ def get_financial_metric(
 ) -> FinancialFact:
     """Look up one Financial Fact a Company reported in its 10-K.
 
-    Returns the exact reported value with its Fiscal Year, period end and source
-    Filing. Use the returned numbers as-is; never estimate a value the tool did
-    not return.
+    Returns the exact reported value with its Fiscal Year, period end and the
+    Filing it came from. Use the returned numbers as-is; never estimate a value
+    the tool did not return.
     """
-    matches = [f for f in FACTS if f.ticker == ticker and f.metric == metric]
+    matches = [fact for fact in FACTS if fact.ticker == ticker and fact.metric == metric]
     if fiscal_year is not None:
-        matches = [f for f in matches if f.fiscal_year == fiscal_year]
+        matches = [fact for fact in matches if fact.fiscal_year == fiscal_year]
     if not matches:
-        raise ToolError(f"No {metric} data for {ticker} fiscal year {fiscal_year}.")
-    return max(matches, key=lambda f: f.fiscal_year)
+        period = f"fiscal year {fiscal_year}" if fiscal_year is not None else "any fiscal year"
+        raise ToolError(f"No {metric} Financial Fact for {ticker} in {period}.")
+    return max(matches, key=lambda fact: fact.fiscal_year)
 
 
 if __name__ == "__main__":
