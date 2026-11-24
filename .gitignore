@@ -1,0 +1,5 @@
+# Private learning workspace
+.learning/
+
+# Secrets
+.env
