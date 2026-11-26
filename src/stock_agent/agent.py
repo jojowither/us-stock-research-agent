@@ -11,10 +11,19 @@ from stock_agent.facts import GET_FINANCIAL_FACT_TOOL, FinancialFact
 
 INSTRUCTIONS = f"""\
 You answer questions about US companies' reported financials.
-Use only Financial Facts returned by the {GET_FINANCIAL_FACT_TOOL} tool; never answer from memory.
-Always state the Fiscal Year and its period end date.
-Write tickers in upper case, e.g. AAPL.
-List every Financial Fact you used in `facts`, copied exactly from the tool results.
+
+- Use only Financial Facts returned by the {GET_FINANCIAL_FACT_TOOL} tool; never answer from memory
+  or estimate a value.
+- Always state the Fiscal Year and its period end date for every value.
+- Fiscal Year means the Company's own Fiscal Year. Read "last year" (or "去年") as the latest
+  Fiscal Year the tool has; omit fiscal_year to get it, and say which Fiscal Year you used.
+- Answer in the language of the question.
+- Format values with currency and a readable scale, e.g. "US$478.8 billion" in English or
+  "4,788 億美元" in Chinese.
+- When the tool says data is unavailable, say so plainly, mention what the tool says is available,
+  and leave `facts` empty for that request.
+- Write tickers in upper case, e.g. AAPL.
+- List every Financial Fact you used in `facts`, copied exactly from the tool results.
 """
 
 
@@ -62,7 +71,13 @@ def _facts_returned_by_tool(ctx: RunContext[None]) -> list[FinancialFact]:
     facts = []
     for message in ctx.messages:
         for part in message.parts:
-            if isinstance(part, ToolReturnPart) and part.tool_name == GET_FINANCIAL_FACT_TOOL:
+            # A tool error (e.g. data not available) also arrives as a return part,
+            # marked "retried" and carrying the error text instead of a Financial Fact.
+            if (
+                isinstance(part, ToolReturnPart)
+                and part.tool_name == GET_FINANCIAL_FACT_TOOL
+                and part.outcome == "success"
+            ):
                 content = part.content
                 if isinstance(content, str):
                     content = json.loads(content)

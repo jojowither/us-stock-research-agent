@@ -1,7 +1,7 @@
 import json
 
 import pytest
-from pydantic import ValidationError
+from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import (
     ModelMessage,
     ModelResponse,
@@ -50,12 +50,33 @@ def test_cli_prints_answer_and_the_financial_fact_it_used(monkeypatch, capfd):
     assert "10-K filed 2026-11-03" in out
 
 
-def test_cli_rejects_a_non_gemini_model_setting(monkeypatch):
+def _llm_that_must_not_be_called() -> FunctionModel:
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        raise AssertionError("the CLI called the model despite invalid settings")
+
+    return FunctionModel(respond)
+
+
+def test_cli_fails_fast_with_a_clear_message_when_the_api_key_is_missing(capfd):
+    with agent.override(model=_llm_that_must_not_be_called()):
+        exit_code = main(["What was Apple's latest revenue?"])
+
+    err = capfd.readouterr().err
+    assert exit_code == 2
+    assert "GOOGLE_API_KEY is not set" in err
+    assert "Traceback" not in err
+
+
+def test_cli_rejects_a_non_gemini_model_setting(monkeypatch, capfd):
     monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
     monkeypatch.setenv("STOCK_AGENT_MODEL", "openai:gpt-6")
 
-    with pytest.raises(ValidationError, match="only Gemini models"):
-        main(["What was Apple's latest revenue?"])
+    with agent.override(model=_llm_that_must_not_be_called()):
+        exit_code = main(["What was Apple's latest revenue?"])
+
+    err = capfd.readouterr().err
+    assert exit_code == 2
+    assert "only Gemini models are supported" in err
 
 
 def _replace_the_real_fact(real: dict) -> list[dict]:
@@ -104,3 +125,47 @@ def test_cli_never_prints_a_financial_fact_the_tool_did_not_return(
     assert "Corrected answer." in out
     assert "999,000,000,000" not in out
     assert "478,834,000,000 USD" in out
+
+
+def test_cli_says_plainly_when_data_is_unavailable(monkeypatch, capfd):
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+    seen_errors: list[str] = []
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        # A tool error comes back as a tool return marked "retried", carrying the error text.
+        errors = [
+            p
+            for p in messages[-1].parts
+            if isinstance(p, ToolReturnPart) and p.outcome == "retried"
+        ]
+        if not errors:
+            args = {"ticker": "TSLA", "metric": "revenue"}
+            return ModelResponse(parts=[ToolCallPart(GET_FINANCIAL_FACT_TOOL, args)])
+        seen_errors.append(errors[0].content)
+        final = {"text": "No revenue data for TSLA. Available: AAPL, MSFT.", "facts": []}
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, final)])
+
+    with agent.override(model=FunctionModel(respond)):
+        exit_code = main(["What was Tesla's latest revenue?"])
+
+    out = capfd.readouterr().out
+    assert exit_code == 0
+    assert "AAPL (fiscal years 2025, 2026)" in seen_errors[0]
+    assert "No revenue data for TSLA" in out
+    assert "Sources:" not in out
+
+
+def test_cli_prints_a_readable_error_when_the_llm_call_fails(monkeypatch, capfd):
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+
+    def rate_limited(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        raise ModelHTTPError(status_code=429, model_name="gemini-3.8-flash", body="quota")
+
+    with agent.override(model=FunctionModel(rate_limited)):
+        exit_code = main(["What was Apple's latest revenue?"])
+
+    err = capfd.readouterr().err
+    assert exit_code == 1
+    assert "stock-agent: the model request failed" in err
+    assert "429" in err
+    assert "Traceback" not in err
