@@ -15,18 +15,40 @@ from stock_agent.facts import (
 
 mcp = FastMCP("stock-data")
 
-# Values from SEC companyfacts, matched to each 10-K by period end rather than
-# the `fy` field, which is the filing's year, not the period's.
-FACTS = [
-    FinancialFact(
-        ticker="AAPL",
-        metric=FinancialMetric.REVENUE,
-        fiscal_year=2026,
-        period_end=date(2026, 9, 26),
-        value=478_834_000_000,
+REVENUE, NET_INCOME = FinancialMetric.REVENUE, FinancialMetric.NET_INCOME
+
+
+def _from_10k(
+    ticker: str,
+    metric: FinancialMetric,
+    fiscal_year: int,
+    period_end: date,
+    value: int,
+    filed_on: date,
+) -> FinancialFact:
+    return FinancialFact(
+        ticker=ticker,
+        metric=metric,
+        fiscal_year=fiscal_year,
+        period_end=period_end,
+        value=value,
         unit="USD",
-        filing=Filing(form="10-K", filed_on=date(2026, 11, 3)),
-    ),
+        filing=Filing(form="10-K", filed_on=filed_on),
+    )
+
+
+# Values from SEC companyfacts, matched to each 10-K by period end rather than
+# the `fy` field, which is the filing's year, not the period's. Each FY2025 value
+# is restated identically in the FY2026 10-K.
+FACTS = [
+    _from_10k("AAPL", REVENUE, 2026, date(2026, 9, 26), 478_834_000_000, date(2026, 11, 3)),
+    _from_10k("AAPL", REVENUE, 2025, date(2025, 9, 27), 416_161_000_000, date(2025, 10, 31)),
+    _from_10k("AAPL", NET_INCOME, 2026, date(2026, 9, 26), 132_175_000_000, date(2026, 11, 3)),
+    _from_10k("AAPL", NET_INCOME, 2025, date(2025, 9, 27), 112_010_000_000, date(2025, 10, 31)),
+    _from_10k("MSFT", REVENUE, 2026, date(2026, 6, 30), 331_839_000_000, date(2026, 7, 29)),
+    _from_10k("MSFT", REVENUE, 2025, date(2025, 6, 30), 281_724_000_000, date(2025, 7, 30)),
+    _from_10k("MSFT", NET_INCOME, 2026, date(2026, 6, 30), 133_749_000_000, date(2026, 7, 29)),
+    _from_10k("MSFT", NET_INCOME, 2025, date(2025, 6, 30), 101_832_000_000, date(2025, 7, 30)),
 ]
 
 
@@ -55,8 +77,22 @@ def get_financial_fact(
         matches = [fact for fact in matches if fact.fiscal_year == fiscal_year]
     if not matches:
         period = f"fiscal year {fiscal_year}" if fiscal_year is not None else "any fiscal year"
-        raise ToolError(f"No {metric} Financial Fact for {ticker} in {period}.")
+        raise ToolError(
+            f"No {metric} Financial Fact for {ticker} in {period}. "
+            f"Available {metric}: {_available(ticker, metric)}."
+        )
     return max(matches, key=lambda fact: fact.fiscal_year)
+
+
+def _available(ticker: str, metric: FinancialMetric) -> str:
+    """Fiscal years per ticker for `metric`, narrowed to `ticker` when it has any."""
+    years: dict[str, list[int]] = {}
+    for fact in sorted(FACTS, key=lambda fact: (fact.ticker, fact.fiscal_year)):
+        if fact.metric == metric:
+            years.setdefault(fact.ticker, []).append(fact.fiscal_year)
+    if ticker in years:
+        years = {ticker: years[ticker]}
+    return ", ".join(f"{t} (fiscal years {', '.join(map(str, fys))})" for t, fys in years.items())
 
 
 if __name__ == "__main__":
