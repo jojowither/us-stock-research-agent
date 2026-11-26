@@ -56,7 +56,16 @@ def test_cli_rejects_a_non_gemini_model_setting(monkeypatch):
         main(["What was Apple's latest revenue?"])
 
 
-def test_cli_never_prints_a_financial_fact_the_tool_did_not_return(monkeypatch, capfd):
+def _replace_the_real_fact(real: dict) -> list[dict]:
+    return [{**real, "value": 999_000_000_000}]
+
+
+def _add_an_invented_fact(real: dict) -> list[dict]:
+    return [real, {**real, "ticker": "MSFT", "value": 999_000_000_000}]
+
+
+@pytest.mark.parametrize("first_facts", [_replace_the_real_fact, _add_an_invented_fact])
+def test_cli_never_prints_a_financial_fact_the_tool_did_not_return(monkeypatch, capfd, first_facts):
     monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
     real_fact: dict = {}
 
@@ -78,8 +87,7 @@ def test_cli_never_prints_a_financial_fact_the_tool_did_not_return(monkeypatch, 
             return ModelResponse(parts=[ToolCallPart("get_financial_fact", args)])
         content = returns[0].content
         real_fact.update(json.loads(content) if isinstance(content, str) else content)
-        invented = {**real_fact, "value": 999_000_000_000}
-        final = {"text": "Invented answer.", "facts": [invented]}
+        final = {"text": "Invented answer.", "facts": first_facts(real_fact)}
         return ModelResponse(parts=[ToolCallPart(output_tool, final)])
 
     with agent.override(model=FunctionModel(respond)):
