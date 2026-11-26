@@ -9,3 +9,10 @@
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+
+# GCP service account keys
+*service-account*.json
+chatbot-*.json
+
+# macOS
+.DS_Store

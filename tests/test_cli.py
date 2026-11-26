@@ -1,6 +1,8 @@
 import json
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import (
     ModelMessage,
@@ -12,8 +14,9 @@ from pydantic_ai.messages import (
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from stock_agent.agent import agent
-from stock_agent.cli import main
+from stock_agent.cli import build_model, main
 from stock_agent.facts import GET_FINANCIAL_FACT_TOOL
+from stock_agent.settings import Settings
 
 
 def scripted_llm(tool_args: dict, answer_text: str) -> FunctionModel:
@@ -187,3 +190,84 @@ def test_cli_answers_after_several_unavailable_lookups(monkeypatch, capfd):
 
     assert exit_code == 0
     assert "No revenue data for TSLA, NVDA or AMZN." in capfd.readouterr().out
+
+
+@pytest.fixture
+def service_account_file(tmp_path):
+    """A well-formed service account key that no real Google Cloud project knows."""
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    pem = private_key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.NoEncryption(),
+    ).decode()
+    path = tmp_path / "service-account.json"
+    path.write_text(
+        json.dumps(
+            {
+                "type": "service_account",
+                "project_id": "test-project",
+                "private_key_id": "test",
+                "private_key": pem,
+                "client_email": "agent@test-project.iam.gserviceaccount.com",
+                "client_id": "1",
+                "token_uri": "https://oauth2.googleapis.com/token",
+            }
+        )
+    )
+    return path
+
+
+def test_cli_answers_with_a_service_account_and_no_api_key(
+    monkeypatch, capfd, service_account_file
+):
+    monkeypatch.setenv("STOCK_AGENT_MODEL", "google-cloud:gemini-3.6-flash")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(service_account_file))
+    llm = scripted_llm({"ticker": "AAPL", "metric": "revenue"}, "Apple's FY2026 revenue.")
+
+    with agent.override(model=llm):
+        exit_code = main(["What was Apple's latest revenue?"])
+
+    assert exit_code == 0
+    assert "Apple's FY2026 revenue." in capfd.readouterr().out
+
+
+def test_google_cloud_model_authenticates_with_the_service_account(
+    monkeypatch, service_account_file
+):
+    monkeypatch.setenv("STOCK_AGENT_MODEL", "google-cloud:gemini-3.6-flash")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(service_account_file))
+
+    model = build_model(Settings())
+
+    assert model.system == "google-cloud"
+    assert model.model_name == "gemini-3.6-flash"
+
+
+def test_google_model_authenticates_with_the_api_key(monkeypatch):
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+
+    model = build_model(Settings())
+
+    assert model.system == "google"
+
+
+@pytest.mark.parametrize(
+    ("credentials", "expected"),
+    [
+        (None, "GOOGLE_APPLICATION_CREDENTIALS is not set"),
+        ("missing.json", "GOOGLE_APPLICATION_CREDENTIALS: no service account key file at"),
+    ],
+)
+def test_cli_explains_a_missing_service_account_key(monkeypatch, capfd, credentials, expected):
+    monkeypatch.setenv("STOCK_AGENT_MODEL", "google-cloud:gemini-3.6-flash")
+    if credentials is not None:
+        monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", credentials)
+
+    with agent.override(model=_llm_that_must_not_be_called()):
+        exit_code = main(["What was Apple's latest revenue?"])
+
+    err = capfd.readouterr().err
+    assert exit_code == 2
+    assert expected in err
+    assert "Traceback" not in err

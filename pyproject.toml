@@ -5,6 +5,7 @@ description = "An LLM agent that answers US stock research questions from SEC fi
 requires-python = ">=3.14"
 dependencies = [
     "fastmcp>=4.2.5",
+    "google-auth>=2.63.1",
     "pydantic-ai-slim[google,mcp]>=2.73.0",
     "pydantic-settings>=2.16.3",
 ]
@@ -18,6 +19,7 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "cryptography>=50.0.2",
     "pytest>=9.2.0",
     "ruff>=0.17.6",
 ]

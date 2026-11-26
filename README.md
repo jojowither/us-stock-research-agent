@@ -38,7 +38,10 @@ uv sync
 cp .env.example .env
 ```
 
-Then set `GOOGLE_API_KEY` in `.env` to a Gemini API key from [Google AI Studio](https://aistudio.google.com/apikey). `STOCK_AGENT_MODEL` is optional.
+Then pick one way to reach Gemini:
+
+- **API key** (default): set `GOOGLE_API_KEY` to a key from [Google AI Studio](https://aistudio.google.com/apikey). `STOCK_AGENT_MODEL` (`google:<model>`) is optional.
+- **Service account** (Vertex AI): set `STOCK_AGENT_MODEL=google-cloud:<model>` and `GOOGLE_APPLICATION_CREDENTIALS` to the key file's path. The Google Cloud project comes from the key file; `GOOGLE_CLOUD_LOCATION` defaults to `global`. Keep the key file outside the repository.
 
 ## Run
 
