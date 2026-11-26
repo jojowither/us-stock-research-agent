@@ -5,7 +5,13 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from stock_agent.facts import FinancialFact, FinancialMetric, Ticker
+from stock_agent.facts import (
+    GET_FINANCIAL_FACT_TOOL,
+    Filing,
+    FinancialFact,
+    FinancialMetric,
+    Ticker,
+)
 
 mcp = FastMCP("stock-data")
 
@@ -19,12 +25,12 @@ FACTS = [
         period_end=date(2026, 9, 26),
         value=478_834_000_000,
         unit="USD",
-        filing="10-K filed 2026-11-03",
+        filing=Filing(form="10-K", filed_on=date(2026, 11, 3)),
     ),
 ]
 
 
-@mcp.tool
+@mcp.tool(name=GET_FINANCIAL_FACT_TOOL)
 def get_financial_fact(
     ticker: Annotated[Ticker, Field(description="Company ticker, e.g. AAPL or MSFT.")],
     metric: Annotated[FinancialMetric, Field(description="Which Financial Metric to look up.")],
@@ -41,8 +47,8 @@ def get_financial_fact(
     """Look up one Financial Fact a Company reported in its 10-K.
 
     Returns the exact reported value with its Fiscal Year, period end and the
-    Filing it came from. Use the returned numbers as-is; never estimate a value
-    the tool did not return.
+    Filing it came from. Use the returned value as-is; never estimate a value the
+    tool did not return.
     """
     matches = [fact for fact in FACTS if fact.ticker == ticker and fact.metric == metric]
     if fiscal_year is not None:

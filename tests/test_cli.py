@@ -13,6 +13,7 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from stock_agent.agent import agent
 from stock_agent.cli import main
+from stock_agent.facts import GET_FINANCIAL_FACT_TOOL
 
 
 def scripted_llm(tool_args: dict, answer_text: str) -> FunctionModel:
@@ -21,7 +22,7 @@ def scripted_llm(tool_args: dict, answer_text: str) -> FunctionModel:
     def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         returns = [p for p in messages[-1].parts if isinstance(p, ToolReturnPart)]
         if not returns:
-            return ModelResponse(parts=[ToolCallPart("get_financial_fact", tool_args)])
+            return ModelResponse(parts=[ToolCallPart(GET_FINANCIAL_FACT_TOOL, tool_args)])
         fact = returns[0].content
         if isinstance(fact, str):
             fact = json.loads(fact)
@@ -32,6 +33,7 @@ def scripted_llm(tool_args: dict, answer_text: str) -> FunctionModel:
 
 
 def test_cli_prints_answer_and_the_financial_fact_it_used(monkeypatch, capfd):
+    """FunctionModel drives the real MCP server over stdio; the Pydantic AI docs don't say so."""
     monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
     llm = scripted_llm(
         {"ticker": "AAPL", "metric": "revenue"},
@@ -64,8 +66,10 @@ def _add_an_invented_fact(real: dict) -> list[dict]:
     return [real, {**real, "ticker": "MSFT", "value": 999_000_000_000}]
 
 
-@pytest.mark.parametrize("first_facts", [_replace_the_real_fact, _add_an_invented_fact])
-def test_cli_never_prints_a_financial_fact_the_tool_did_not_return(monkeypatch, capfd, first_facts):
+@pytest.mark.parametrize("first_answer_facts", [_replace_the_real_fact, _add_an_invented_fact])
+def test_cli_never_prints_a_financial_fact_the_tool_did_not_return(
+    monkeypatch, capfd, first_answer_facts
+):
     monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
     real_fact: dict = {}
 
@@ -80,14 +84,16 @@ def test_cli_never_prints_a_financial_fact_the_tool_did_not_return(monkeypatch, 
             final = {"text": "Corrected answer.", "facts": [real_fact]}
             return ModelResponse(parts=[ToolCallPart(output_tool, final)])
         returns = [
-            p for p in last if isinstance(p, ToolReturnPart) and p.tool_name == "get_financial_fact"
+            p
+            for p in last
+            if isinstance(p, ToolReturnPart) and p.tool_name == GET_FINANCIAL_FACT_TOOL
         ]
         if not returns:
             args = {"ticker": "AAPL", "metric": "revenue"}
-            return ModelResponse(parts=[ToolCallPart("get_financial_fact", args)])
+            return ModelResponse(parts=[ToolCallPart(GET_FINANCIAL_FACT_TOOL, args)])
         content = returns[0].content
         real_fact.update(json.loads(content) if isinstance(content, str) else content)
-        final = {"text": "Invented answer.", "facts": first_facts(real_fact)}
+        final = {"text": "Invented answer.", "facts": first_answer_facts(real_fact)}
         return ModelResponse(parts=[ToolCallPart(output_tool, final)])
 
     with agent.override(model=FunctionModel(respond)):

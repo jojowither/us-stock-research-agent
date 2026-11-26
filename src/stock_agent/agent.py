@@ -7,11 +7,11 @@ from pydantic_ai import Agent, ModelRetry, RunContext
 from pydantic_ai.mcp import MCPToolset
 from pydantic_ai.messages import ToolReturnPart
 
-from stock_agent.facts import FinancialFact
+from stock_agent.facts import GET_FINANCIAL_FACT_TOOL, FinancialFact
 
-INSTRUCTIONS = """\
+INSTRUCTIONS = f"""\
 You answer questions about US companies' reported financials.
-Use only numbers returned by the get_financial_fact tool; never answer from memory.
+Use only Financial Facts returned by the {GET_FINANCIAL_FACT_TOOL} tool; never answer from memory.
 Always state the Fiscal Year and its period end date.
 Write tickers in upper case, e.g. AAPL.
 List every Financial Fact you used in `facts`, copied exactly from the tool results.
@@ -19,8 +19,20 @@ List every Financial Fact you used in `facts`, copied exactly from the tool resu
 
 
 class Answer(BaseModel):
-    text: str = Field(description="The answer to the question.")
-    facts: list[FinancialFact] = Field(description="Financial Facts the answer relied on.")
+    """The final answer to the question, with the Financial Facts it relied on."""
+
+    text: str = Field(
+        description=(
+            "The answer to the question. State the Fiscal Year and period end of every "
+            "value, and take every value from `facts`."
+        )
+    )
+    facts: list[FinancialFact] = Field(
+        description=(
+            f"Every Financial Fact the answer relied on, copied exactly from "
+            f"{GET_FINANCIAL_FACT_TOOL} results."
+        )
+    )
 
 
 def build_agent() -> Agent[None, Answer]:
@@ -39,7 +51,7 @@ def facts_must_come_from_tool(ctx: RunContext[None], answer: Answer) -> Answer:
     invented = [fact for fact in answer.facts if fact not in returned]
     if invented:
         raise ModelRetry(
-            "These facts were not returned by get_financial_fact in this conversation: "
+            f"These facts were not returned by {GET_FINANCIAL_FACT_TOOL} in this conversation: "
             f"{[fact.model_dump(mode='json') for fact in invented]}. "
             "Copy Financial Facts exactly from the tool results, or call the tool again."
         )
@@ -50,7 +62,7 @@ def _facts_returned_by_tool(ctx: RunContext[None]) -> list[FinancialFact]:
     facts = []
     for message in ctx.messages:
         for part in message.parts:
-            if isinstance(part, ToolReturnPart) and part.tool_name == "get_financial_fact":
+            if isinstance(part, ToolReturnPart) and part.tool_name == GET_FINANCIAL_FACT_TOOL:
                 content = part.content
                 if isinstance(content, str):
                     content = json.loads(content)

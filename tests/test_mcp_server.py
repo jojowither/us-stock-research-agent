@@ -20,7 +20,7 @@ async def test_returns_apple_revenue_for_requested_fiscal_year():
         "period_end": "2026-09-26",
         "value": 478834000000,
         "unit": "USD",
-        "filing": "10-K filed 2026-11-03",
+        "filing": {"form": "10-K", "filed_on": "2026-11-03"},
     }
 
 

@@ -12,10 +12,21 @@ Ticker = Annotated[
     StringConstraints(pattern=r"^[A-Z][A-Z.\-]{0,9}$"),
 ]
 
+# The agent's source check matches tool results by this name, so the server and
+# the agent must share it.
+GET_FINANCIAL_FACT_TOOL = "get_financial_fact"
+
 
 class FinancialMetric(StrEnum):
     REVENUE = "revenue"
     NET_INCOME = "net_income"
+
+
+class Filing(BaseModel):
+    """The SEC Filing a Financial Fact was reported in."""
+
+    form: str = Field(description="SEC form type, e.g. 10-K.")
+    filed_on: date = Field(description="Date the Filing was submitted to the SEC.")
 
 
 class FinancialFact(BaseModel):
@@ -27,6 +38,4 @@ class FinancialFact(BaseModel):
     period_end: date = Field(description="Last day of the period the value covers.")
     value: int = Field(description="Raw value in `unit`, not scaled (no thousands or millions).")
     unit: str = Field(description="Unit of `value`, e.g. USD.")
-    filing: str = Field(
-        description="The Filing the value was reported in, e.g. 10-K filed 2026-11-03."
-    )
+    filing: Filing = Field(description="The Filing the value was reported in.")
