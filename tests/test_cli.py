@@ -169,3 +169,21 @@ def test_cli_prints_a_readable_error_when_the_llm_call_fails(monkeypatch, capfd)
     assert "stock-agent: the model request failed" in err
     assert "429" in err
     assert "Traceback" not in err
+
+
+def test_cli_answers_after_several_unavailable_lookups(monkeypatch, capfd):
+    monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+    unknown = ["TSLA", "NVDA", "AMZN"]
+
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        if unknown:
+            args = {"ticker": unknown.pop(0), "metric": "revenue"}
+            return ModelResponse(parts=[ToolCallPart(GET_FINANCIAL_FACT_TOOL, args)])
+        final = {"text": "No revenue data for TSLA, NVDA or AMZN.", "facts": []}
+        return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, final)])
+
+    with agent.override(model=FunctionModel(respond)):
+        exit_code = main(["Compare Tesla, Nvidia and Amazon revenue."])
+
+    assert exit_code == 0
+    assert "No revenue data for TSLA, NVDA or AMZN." in capfd.readouterr().out

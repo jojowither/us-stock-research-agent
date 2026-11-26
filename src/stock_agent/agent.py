@@ -45,8 +45,11 @@ class Answer(BaseModel):
 
 
 def build_agent() -> Agent[None, Answer]:
+    # "Not available" comes back as a tool error, which spends a retry; a question
+    # about several unknown Companies needs more than the default single retry.
     data_server = MCPToolset(
-        StdioTransport(command=sys.executable, args=["-m", "stock_agent.mcp_server"])
+        StdioTransport(command=sys.executable, args=["-m", "stock_agent.mcp_server"]),
+        max_retries=3,
     )
     # No model here: the CLI picks it from settings at run time, so importing
     # this module never needs an API key.
