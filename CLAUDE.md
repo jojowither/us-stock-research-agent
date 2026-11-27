@@ -10,6 +10,14 @@ Per slice: `/grill-with-docs` → `/to-spec` → `/to-tickets` → slice branch 
 
 The developer makes every design decision; present options with their trade-offs and implement the chosen one.
 
+## Code standards
+
+- Skip comments that restate what the code does.
+- Comment only the non-obvious *why*: a gotcha, a constraint, a deliberate deviation the code cannot show.
+- MCP tool docstrings and `Field(description=...)` are prompts the LLM reads; write them carefully for every tool and parameter.
+- Express rules through names, types, Pydantic validation and tests. Guard real invariants with explicit checks that raise, not `assert` (skipped under `python -O`).
+- Repo text (code, comments, docs, issues, PRs) is in English.
+
 ## Coaching
 
 @.learning/COACHING.md
