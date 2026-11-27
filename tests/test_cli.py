@@ -3,7 +3,8 @@ import json
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
-from pydantic_ai.exceptions import ModelHTTPError
+from google.auth.exceptions import RefreshError
+from pydantic_ai.exceptions import ModelHTTPError, UnexpectedModelBehavior
 from pydantic_ai.messages import (
     ModelMessage,
     ModelResponse,
@@ -158,19 +159,59 @@ def test_cli_says_plainly_when_data_is_unavailable(monkeypatch, capfd):
     assert "Sources:" not in out
 
 
-def test_cli_prints_a_readable_error_when_the_llm_call_fails(monkeypatch, capfd):
+def _failing_llm(error: Exception) -> FunctionModel:
+    def respond(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+        raise error
+
+    return FunctionModel(respond)
+
+
+GEMINI_QUOTA_BODY = {
+    "error": {
+        "code": 429,
+        "message": "You exceeded your current quota.\n* Quota exceeded for metric: requests",
+        "status": "RESOURCE_EXHAUSTED",
+        "details": [{"@type": "type.googleapis.com/google.rpc.QuotaFailure"}],
+    }
+}
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (
+            ModelHTTPError(status_code=429, model_name="gemini-3.8-flash", body=GEMINI_QUOTA_BODY),
+            "the model request failed (HTTP 429: You exceeded your current quota.). "
+            "Try again later.",
+        ),
+        (
+            ModelHTTPError(status_code=503, model_name="gemini-3.8-flash", body="overloaded"),
+            "the model request failed (HTTP 503: overloaded). Try again later.",
+        ),
+        (
+            UnexpectedModelBehavior("Exceeded maximum output retries (1)"),
+            "the model did not produce a valid answer (Exceeded maximum output retries (1)).",
+        ),
+        (
+            RefreshError("invalid_grant: Invalid JWT Signature."),
+            "authentication with the service account failed "
+            "(invalid_grant: Invalid JWT Signature.)",
+        ),
+    ],
+    ids=["quota", "overloaded", "no-valid-answer", "auth"],
+)
+def test_cli_prints_a_short_readable_error_when_the_llm_call_fails(
+    monkeypatch, capfd, error, expected
+):
     monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
 
-    def rate_limited(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
-        raise ModelHTTPError(status_code=429, model_name="gemini-3.8-flash", body="quota")
-
-    with agent.override(model=FunctionModel(rate_limited)):
+    with agent.override(model=_failing_llm(error)):
         exit_code = main(["What was Apple's latest revenue?"])
 
     err = capfd.readouterr().err
     assert exit_code == 1
-    assert "stock-agent: the model request failed" in err
-    assert "429" in err
+    assert f"stock-agent: {expected}" in err
+    assert "RESOURCE_EXHAUSTED" not in err
     assert "Traceback" not in err
 
 
@@ -270,4 +311,28 @@ def test_cli_explains_a_missing_service_account_key(monkeypatch, capfd, credenti
     err = capfd.readouterr().err
     assert exit_code == 2
     assert expected in err
+    assert "Traceback" not in err
+
+
+@pytest.mark.parametrize(
+    ("content", "reason"),
+    [
+        ("{}", "missing fields"),
+        ("not json", "Expecting value"),
+    ],
+    ids=["missing-fields", "not-json"],
+)
+def test_cli_explains_an_invalid_service_account_key(monkeypatch, capfd, tmp_path, content, reason):
+    key_file = tmp_path / "broken.json"
+    key_file.write_text(content)
+    monkeypatch.setenv("STOCK_AGENT_MODEL", "google-cloud:gemini-3.6-flash")
+    monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", str(key_file))
+
+    with agent.override(model=_llm_that_must_not_be_called()):
+        exit_code = main(["What was Apple's latest revenue?"])
+
+    err = capfd.readouterr().err
+    assert exit_code == 2
+    assert f"GOOGLE_APPLICATION_CREDENTIALS: {key_file} is not a valid service account key" in err
+    assert reason in err
     assert "Traceback" not in err

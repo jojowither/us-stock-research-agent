@@ -1,10 +1,12 @@
 import argparse
 import asyncio
 import sys
+from pathlib import Path
 
+from google.auth.exceptions import GoogleAuthError
 from google.oauth2 import service_account
 from pydantic import ValidationError
-from pydantic_ai.exceptions import AgentRunError
+from pydantic_ai.exceptions import AgentRunError, ModelHTTPError, UnexpectedModelBehavior
 from pydantic_ai.models.google import GoogleModel
 from pydantic_ai.providers.google import GoogleProvider
 from pydantic_ai.providers.google_cloud import GoogleCloudProvider
@@ -40,9 +42,14 @@ def main(argv: list[str] | None = None) -> int:
             print(f"stock-agent: {_explain(problem)}", file=sys.stderr)
         return 2
     try:
-        result = asyncio.run(agent.run(args.question, model=build_model(settings)))
-    except AgentRunError as error:
-        print(f"stock-agent: the model request failed ({error}). Try again later.", file=sys.stderr)
+        model = build_model(settings)
+    except ValueError as error:
+        print(f"stock-agent: {error}", file=sys.stderr)
+        return 2
+    try:
+        result = asyncio.run(agent.run(args.question, model=model))
+    except (AgentRunError, GoogleAuthError) as error:
+        print(f"stock-agent: {_describe_model_failure(error)}", file=sys.stderr)
         return 1
     print(render(result.output))
     return 0
@@ -50,9 +57,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def build_model(settings: Settings) -> GoogleModel:
     if settings.uses_google_cloud:
-        credentials = service_account.Credentials.from_service_account_file(
-            settings.google_application_credentials.expanduser()
-        )
+        credentials = _load_service_account(settings.google_application_credentials)
         provider = GoogleCloudProvider(
             credentials=credentials,
             project=credentials.project_id,
@@ -61,6 +66,40 @@ def build_model(settings: Settings) -> GoogleModel:
     else:
         provider = GoogleProvider(api_key=settings.google_api_key.get_secret_value())
     return GoogleModel(settings.gemini_model_name, provider=provider)
+
+
+def _load_service_account(path: Path) -> service_account.Credentials:
+    try:
+        return service_account.Credentials.from_service_account_file(path.expanduser())
+    except ValueError as error:
+        raise ValueError(
+            f"GOOGLE_APPLICATION_CREDENTIALS: {path} is not a valid service account key "
+            f"({_first_line(error)})"
+        ) from error
+
+
+def _describe_model_failure(error: AgentRunError | GoogleAuthError) -> str:
+    if isinstance(error, GoogleAuthError):
+        return f"authentication with the service account failed ({_first_line(error)})"
+    if isinstance(error, UnexpectedModelBehavior):
+        return f"the model did not produce a valid answer ({error.message})."
+    if isinstance(error, ModelHTTPError):
+        detail = f"HTTP {error.status_code}: {_provider_message(error.body)}"
+    else:
+        detail = error.message
+    return f"the model request failed ({detail}). Try again later."
+
+
+def _provider_message(body: object) -> str:
+    # Gemini wraps errors as {"error": {"message": ...}}; the rest of the body is quota detail.
+    if isinstance(body, dict) and isinstance(body.get("error"), dict):
+        body = body["error"].get("message", body)
+    return _first_line(body if body is not None else "")
+
+
+def _first_line(text: object) -> str:
+    lines = str(text).strip().splitlines()
+    return lines[0] if lines else "no details"
 
 
 def _explain(problem: ErrorDetails) -> str:
