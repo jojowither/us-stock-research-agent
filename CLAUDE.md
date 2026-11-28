@@ -12,11 +12,11 @@ The developer makes every design decision; present options with their trade-offs
 
 ## Code standards
 
-- Skip comments that restate what the code does.
-- Comment only the non-obvious *why*: a gotcha, a constraint, a deliberate deviation the code cannot show.
-- MCP tool docstrings and `Field(description=...)` are prompts the LLM reads; write them carefully for every tool and parameter.
-- Express rules through names, types, Pydantic validation and tests. Guard real invariants with explicit checks that raise, not `assert` (skipped under `python -O`).
-- Repo text (code, comments, docs, issues, PRs) is in English.
+Write and review code against [CODING_STANDARDS.md](CODING_STANDARDS.md).
+
+## Real-model checks
+
+Before running `stock-agent` against a real LLM, read [docs/agents/real-model-checks.md](docs/agents/real-model-checks.md): quotas are small and requests cost money.
 
 ## Coaching
 
