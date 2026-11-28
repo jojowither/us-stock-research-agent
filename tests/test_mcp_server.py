@@ -51,6 +51,7 @@ async def test_omitting_fiscal_year_returns_latest(ticker, metric, value):
     async with Client(mcp) as client:
         result = await client.call_tool("get_financial_fact", {"ticker": ticker, "metric": metric})
 
+    assert result.structured_content is not None
     assert result.structured_content["fiscal_year"] == 2026
     assert result.structured_content["value"] == value
 
@@ -61,6 +62,7 @@ async def test_lowercase_ticker_is_normalised_to_upper_case():
             "get_financial_fact", {"ticker": " aapl ", "metric": "revenue"}
         )
 
+    assert result.structured_content is not None
     assert result.structured_content["ticker"] == "AAPL"
 
 

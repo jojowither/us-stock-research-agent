@@ -117,7 +117,9 @@ def test_cli_never_prints_a_financial_fact_the_tool_did_not_return(
             args = {"ticker": "AAPL", "metric": "revenue"}
             return ModelResponse(parts=[ToolCallPart(GET_FINANCIAL_FACT_TOOL, args)])
         content = returns[0].content
-        real_fact.update(json.loads(content) if isinstance(content, str) else content)
+        returned = json.loads(content) if isinstance(content, str) else content
+        assert isinstance(returned, dict)
+        real_fact.update(returned)
         final = {"text": "Invented answer.", "facts": first_answer_facts(real_fact)}
         return ModelResponse(parts=[ToolCallPart(output_tool, final)])
 
@@ -145,7 +147,7 @@ def test_cli_says_plainly_when_data_is_unavailable(monkeypatch, capfd):
         if not errors:
             args = {"ticker": "TSLA", "metric": "revenue"}
             return ModelResponse(parts=[ToolCallPart(GET_FINANCIAL_FACT_TOOL, args)])
-        seen_errors.append(errors[0].content)
+        seen_errors.append(str(errors[0].content))
         final = {"text": "No revenue data for TSLA. Available: AAPL, MSFT.", "facts": []}
         return ModelResponse(parts=[ToolCallPart(info.output_tools[0].name, final)])
 
