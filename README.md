@@ -54,9 +54,11 @@ The answer comes back in the question's language. If the data isn't available, t
 ## Develop
 
 ```bash
+uv run pre-commit install   # once per clone: blocks commits that contain secrets
 uv run pytest
 uv run ruff check .
 uv run ruff format --check .
+uv run pyright
 ```
 
-Tests never call a real LLM and need no API key: the CLI test replaces only the model, and talks to the real MCP server process. CI runs the same three commands on every pull request.
+Tests never call a real LLM and need no API key: the CLI test replaces only the model, and talks to the real MCP server process. CI runs the same four commands on every pull request, plus a gitleaks scan of the full history.

@@ -53,7 +53,15 @@ def build_agent() -> Agent[None, Answer]:
     )
     # No model here: the CLI picks it from settings at run time, so importing
     # this module never needs an API key.
-    agent = Agent(None, output_type=Answer, toolsets=[data_server], instructions=INSTRUCTIONS)
+    # deps_type pins deps to None; left out, type checkers infer `object` and the
+    # validator's RunContext[None] no longer matches.
+    agent = Agent(
+        None,
+        deps_type=type(None),
+        output_type=Answer,
+        toolsets=[data_server],
+        instructions=INSTRUCTIONS,
+    )
     agent.output_validator(facts_must_come_from_tool)
     return agent
 

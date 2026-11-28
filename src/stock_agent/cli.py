@@ -13,7 +13,7 @@ from pydantic_ai.providers.google_cloud import GoogleCloudProvider
 from pydantic_core import ErrorDetails
 
 from stock_agent.agent import Answer, agent
-from stock_agent.settings import Settings
+from stock_agent.settings import ApiKeyAuth, ServiceAccountAuth, Settings
 
 
 def render(answer: Answer) -> str:
@@ -56,21 +56,20 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def build_model(settings: Settings) -> GoogleModel:
-    if settings.uses_google_cloud:
-        credentials = _load_service_account(settings.google_application_credentials)
-        provider = GoogleCloudProvider(
-            credentials=credentials,
-            project=credentials.project_id,
-            location=settings.google_cloud_location,
-        )
-    else:
-        provider = GoogleProvider(api_key=settings.google_api_key.get_secret_value())
+    match settings.auth:
+        case ServiceAccountAuth(key_file=key_file, location=location):
+            credentials = _load_service_account(key_file)
+            provider = GoogleCloudProvider(
+                credentials=credentials, project=credentials.project_id, location=location
+            )
+        case ApiKeyAuth(api_key=api_key):
+            provider = GoogleProvider(api_key=api_key.get_secret_value())
     return GoogleModel(settings.gemini_model_name, provider=provider)
 
 
 def _load_service_account(path: Path) -> service_account.Credentials:
     try:
-        return service_account.Credentials.from_service_account_file(path.expanduser())
+        return service_account.Credentials.from_service_account_file(path)
     except ValueError as error:
         raise ValueError(
             f"GOOGLE_APPLICATION_CREDENTIALS: {path} is not a valid service account key "

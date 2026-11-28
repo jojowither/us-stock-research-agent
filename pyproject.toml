@@ -20,6 +20,8 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "cryptography>=50.0.2",
+    "pre-commit>=4.7.0",
+    "pyright>=1.1.414",
     "pytest>=9.2.0",
     "ruff>=0.17.6",
 ]
@@ -29,6 +31,11 @@ line-length = 100
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
+
+[tool.pyright]
+include = ["src", "tests"]
+# A new Auth variant without a branch in build_model fails the check.
+reportMatchNotExhaustive = "error"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,10 +1,29 @@
+from dataclasses import dataclass
 from pathlib import Path
 
-from pydantic import SecretStr, field_validator, model_validator
+from pydantic import PrivateAttr, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 GOOGLE_PROVIDER_PREFIX = "google:"
 GOOGLE_CLOUD_PROVIDER_PREFIX = "google-cloud:"
+
+
+@dataclass(frozen=True)
+class ApiKeyAuth:
+    """Reach Gemini through the Gemini API with a Google AI Studio key."""
+
+    api_key: SecretStr
+
+
+@dataclass(frozen=True)
+class ServiceAccountAuth:
+    """Reach Gemini through Vertex AI with a service account key file."""
+
+    key_file: Path
+    location: str
+
+
+type Auth = ApiKeyAuth | ServiceAccountAuth
 
 
 class Settings(BaseSettings):
@@ -14,6 +33,8 @@ class Settings(BaseSettings):
     google_api_key: SecretStr | None = None
     google_application_credentials: Path | None = None
     google_cloud_location: str = "global"
+
+    _auth: Auth = PrivateAttr()
 
     @field_validator("stock_agent_model")
     @classmethod
@@ -28,7 +49,11 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def must_have_credentials_for_the_provider(self) -> Settings:
-        if self.uses_google_cloud:
+        self._auth = self._resolve_auth()
+        return self
+
+    def _resolve_auth(self) -> Auth:
+        if self.stock_agent_model.startswith(GOOGLE_CLOUD_PROVIDER_PREFIX):
             path = self.google_application_credentials
             if path is None:
                 raise _missing("GOOGLE_APPLICATION_CREDENTIALS")
@@ -36,13 +61,17 @@ class Settings(BaseSettings):
                 raise ValueError(
                     f"GOOGLE_APPLICATION_CREDENTIALS: no service account key file at {path}"
                 )
-        elif self.google_api_key is None:
+            return ServiceAccountAuth(
+                key_file=path.expanduser(), location=self.google_cloud_location
+            )
+        if self.google_api_key is None:
             raise _missing("GOOGLE_API_KEY")
-        return self
+        return ApiKeyAuth(api_key=self.google_api_key)
 
     @property
-    def uses_google_cloud(self) -> bool:
-        return self.stock_agent_model.startswith(GOOGLE_CLOUD_PROVIDER_PREFIX)
+    def auth(self) -> Auth:
+        """The credentials the model's provider needs; validation guarantees one is set."""
+        return self._auth
 
     @property
     def gemini_model_name(self) -> str:
